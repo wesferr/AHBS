@@ -4,8 +4,14 @@ import numpy as np
 from mathutils import Vector
 from bpy import context
 
-nplano = Vector((0,0,1))
-dplano = 0.52
+plane = bpy.data.objects['Plane']
+pvertices = plane.data.vertices
+
+v1 = pvertices[0].co - pvertices[1].co
+v2 = pvertices[0].co - pvertices[2].co
+
+nplano = v1.cross(v2)
+dplano = nplano.dot(-pvertices[0].co)
 
 hashmap = {}
 
@@ -48,7 +54,6 @@ def baricentric_coordinates(a,b,c,p):
     return np.array([u, v, w])
     
 
-#obj = context.active_object
 obj = bpy.data.objects['Body']
 
 nmesh = bpy.data.meshes.new('Curve')
