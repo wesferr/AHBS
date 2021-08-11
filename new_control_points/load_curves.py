@@ -38,19 +38,38 @@ def calculate_point(p0, p1):
     intersection_point = p0 + (-t*vd)
     return intersection_point
 
+def test_outside(vertice):
+    p0 = pvertices[0].co
+    p1 = pvertices[1].co
+    p2 = pvertices[2].co
+    p3 = pvertices[3].co
+    value1 = baricentric_coordinates(p0,p1,p2, vertice)
+    value2 = baricentric_coordinates(p1,p2,p3, vertice)
+    return min(value1) < 0 and min(value2) < 0
+#    print((value1 < 1.1 and value1 > 0.99) and (value2 < 1.1 and value2 > 0.99))
+    
+
 def baricentric_coordinates(a,b,c,p):
-    v0 = b - a
-    v1 = c - a
-    v2 = p - a
-    d00 =  v0.dot(v0)
-    d01 =  v0.dot(v1)
-    d11 =  v1.dot(v1)
-    d20 =  v2.dot(v0)
-    d21 =  v2.dot(v1)
-    denom = d00 * d11 - d01 * d01
-    v = (d11 * d20 - d01 * d21) / denom;
-    w = (d00 * d21 - d01 * d20) / denom;
-    u = 1.0 - v - w;
+    
+    vab = b - a
+    vbc = c - b
+    vca = a - c
+    
+    vap = p - a
+    vbp = p - b
+    vcp = p - c
+    
+    n = vab.cross(vbc) / vab.cross(vbc).length;
+    
+    ABC = n.dot(vab.cross(vbc)) / 2
+    ABP = n.dot(vab.cross(vbp)) / 2
+    BCP = n.dot(vbc.cross(vcp)) / 2
+    CAP = n.dot(vca.cross(vap)) / 2
+    
+    w = ABP/ABC
+    u = BCP/ABC
+    v = CAP/ABC
+    
     return np.array([u, v, w])
     
 
@@ -69,6 +88,8 @@ vertice_coordinates = []
 
 def add_to_coordinates(v1, v2, v3, i1, i2, i3):
     point = calculate_point(v2,v1)
+    if test_outside(point):
+        return
     array = np.array([(i1,i2,i3), baricentric_coordinates(v1, v2, v3, point)])
     
     hashfunc = (i1*i2)+i1+i2
@@ -106,7 +127,7 @@ for polygon in polygons:
             add_to_coordinates(v3, v1, v2, i3, i1, i2)
 
             
-np.save("resultado_panturrilha.npy", np.array(vertice_coordinates))
+np.save("altura_virilha.npy", np.array(vertice_coordinates))
         
 bm.to_mesh(nmesh)  
 bm.free()
