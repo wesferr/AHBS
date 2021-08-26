@@ -2,11 +2,20 @@ import scipy
 import time
 import predictor
 import numpy as np
+import multiprocessing
+from itertools import product, repeat
 
 
 FACE_NUM = 25000
 VERTICES_NUM = 12500
-MEASURE_NUM = 19
+MEASURE_NUM = 15
+
+
+def calcnorm(face, vertex):
+    AB = np.array(vertex[face[1]]) - np.array(vertex[face[0]])
+    AC = np.array(vertex[face[2]]) - np.array(vertex[face[0]])
+    n = np.cross(AB, AC)
+    return [(face[0], n), (face[1], n), (face[2], n)]
 
 class Reshaper:
 
@@ -51,26 +60,29 @@ class Reshaper:
         return v, n, f
 
     def compute_normals(vertex, facet):
+
+        pool = multiprocessing.Pool(processes=multiprocessing.cpu_count()//2)
+        tasks = [(
+            facet[i],
+            vertex
+            ) for i in range(len(facet))]
+        faces_normals = pool.starmap(calcnorm, tasks)
+        
+
+        elements = [[] for i in range(0, len(vertex))]
+        for element in faces_normals:
+            elements[element[0][0]].append(element[0][1])
+            elements[element[1][0]].append(element[1][1])
+            elements[element[2][0]].append(element[2][1])
+
         normals = []
-        vertexNormalLists = [[] for i in range(0, len(vertex))]
-
-        for face in facet:
-            AB = np.array(vertex[face[1]]) - np.array(vertex[face[0]])
-            AC = np.array(vertex[face[2]]) - np.array(vertex[face[0]])
-            n = np.cross(AB, AC)
-            n /= np.linalg.norm(n)
-            # adiciona a normal ao array de todas as normais de cada um dos vertics
-            for i in range(0, 3):
-                vertexNormalLists[face[i]].append(n)
-
-        # soma os vetores normais das faces que o vertice faz parte, faz a media e normaliza
-        for idx, normalList in enumerate(vertexNormalLists):
-            normalSum = np.zeros(3)
-            for normal in normalList:
-                normalSum += normal
-            normal = normalSum / float(len(normalList))
+        for normalList in elements:
+            normal = sum(normalList) / len(normalList)
             normal /= np.linalg.norm(normal)
-            normals.append(list(map(float, normal.tolist())))
+            normals.append(normal)
+
+        
+
         return np.array(normals)
 
     # synthesize a body by deform-based, given deform, output vertex
@@ -97,7 +109,7 @@ def save_obj(filename, v, f, n):
 
 if __name__ == "__main__":
 
-    pred = predictor.Predictor(age=19, weight=75, height=170)
+    pred = predictor.Predictor(age=19, weight=85, height=180)
     reshaper = Reshaper()
     v, n, f = reshaper.build_body(pred.current_measures)
     save_obj("teste.obj", v, f, n)

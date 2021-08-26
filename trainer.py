@@ -10,7 +10,7 @@ from sklearn.linear_model import LinearRegression
 
 FACE_NUM = 25000
 VERTICES_NUM = 12500
-MEASURE_NUM = 19
+MEASURE_NUM = 15
 D_BASIS_NUM = 10
 V_BASIS_NUM = 10
 
@@ -199,6 +199,7 @@ if __name__ == "__main__":
     if "cp.npz" in generated_files:
         with np.load("./processed_data/cp.npz", allow_pickle=True) as data:
             cp, vertices, faces, normals = data.values()
+            cp = cp.item()
     else:
         cp, vertices, faces, normals = Loader.load()
         np.savez("./processed_data/cp.npz", cp, vertices, faces, normals)

@@ -1,29 +1,27 @@
 import numpy as np
-from matplotlib import pyplot as plt
 from sklearn.experimental import enable_iterative_imputer
 from sklearn.impute import IterativeImputer
 
 semantic = {
-    "Weight": 0,
-    "Height": 1,
-    "MID_NECK_GTH": 2,
-    "BUST_CHEST_GTH": 3,
-    "BELLY_CIRC": 4,
-    "MIDDLE_HIP": 5,
-    "ARM_LTH_T_NECK_L": 6,
-    "CROTCH_HT": 7,
-    "AC_BACK_WTH_AL": 8,
-    "DIST_NECK_T_HIP": 9,
-    "WAIST_GTH": 10,
-    "HIP_GTH": 11,
-    "WAIST_HT": 12,
-    "ARM_LTH_L": 13,
-    "UP_ARM_GTH_L": 14,
-    "WRIST_GTH": 15,
-    "BREAST_HT": 16,
-    "KNEE_GTH_L": 17,
-    "WTH_THIGH_SUM": 18,
+    "Weight": 0,  # peso
+    "Height": 1,  # altura
+    "WAIST_HT": 2,  # 'altura_cintura'
+    "CROTCH_HT": 3,  # 'altura_virilha'
+    "UP_ARM_GTH_L": 4,  # 'braço'
+    "WAIST_GTH": 5,  # 'cintura'
+    "ARM_LTH_L": 6,  # 'comp_braço'
+    "THIGH_GTH_L_HZ": 7,  # 'coxa'
+    "CR_SHOULDER": 8,  # 'ombro_a_ombro'
+    "CALF_GTH_L": 9,  # 'panturrilha'
+    "BUST_CHEST_GTH": 10,  # 'peito'
+    "MID_NECK_GTH": 11,  # 'pescoço'
+    "DIST_NECK_T_HIP": 12,  # 'pescoço_ao_quadril'
+    "WRIST_GTH": 13,  # 'pulso'
+    "HIP_GTH": 14,  # 'quadril'
+    "Age": 15
 }
+
+MEASURE_NUM = 15
 
 
 class Predictor():
@@ -40,13 +38,12 @@ class Predictor():
         self.initial_weight = weight
         self.initial_height = height
         self.current_age = age
-        data = np.full(19, np.nan)
-        data[0] = weight
-        data[1] = height
-        self.missing_initials(data)
+        self.data = np.full(MEASURE_NUM, np.nan)
+        self.data[0] = weight
+        self.data[1] = height
+        self.missing_initials(self.data)
 
-        ages = self.measures[:, 19].copy()
-        age_array = np.arange(19,85)
+        ages = self.measures[:, 15].copy()
 
         self.mean_measures = self.measures.mean()
         self.std_measures = self.measures.std()
@@ -55,7 +52,8 @@ class Predictor():
 
         self.curves = {}
         for element in semantic.keys():
-            self.curves[element] = np.polynomial.Polynomial.fit(ages, self.measures[:, semantic[element]], deg=4)
+            column = self.measures[:, semantic[element]]
+            self.curves[element] = np.polynomial.Polynomial.fit(ages, column, deg=4)
             first = self.curves[element](self.initial_age)
             self.curves[element] = self.curves[element] - first
  
@@ -74,8 +72,9 @@ class Predictor():
 
         previous_age = self.current_age
         self.current_age += delta_time
+        
 
-        for element in semantic.keys():
+        for element in list(semantic.keys())[:-1]:
             delta_measure = self.curves[element](self.current_age) - self.curves[element](previous_age)
             self.current_measures[0][semantic[element]] += delta_measure * self.measures.std()
 
@@ -92,6 +91,6 @@ class Predictor():
         return self.current_measures
 
 if __name__ == "__main__":
-    pred = Predictor(age=19, weight=65, height=175)
-    for i in range(10):
-        print(pred.predict_next(1))
+    pred = Predictor(age=19, weight=65, height=165)
+    for i in range(100):
+        print(pred.predict_next(denormalize=True))

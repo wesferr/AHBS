@@ -6,33 +6,24 @@ import sys
 
 FACE_NUM = 25000
 VERTICES_NUM = 12500
-MEASURE_NUM = 19
+MEASURE_NUM = 15
 
 
 class Loader:
 
     def load():
-        cp = Loader.load_control_points("control-points.txt")
+        cp = Loader.load_control_points("control_points.npz")
         faces, normals = Loader.load_template("template.obj")
         vertex = Loader.load_models("obj/", label='female')
         return cp, vertex, faces, normals
 
     def load_control_points(path):
         print('Loading control points')
-        f = open(path, "r")
-        tmplist = []
-        cp = []
-        for line in f:
-            if '#' in line:
-                if len(tmplist) != 0:
-                    cp.append(tmplist)
-                    tmplist = []
-            elif len(line.split()) == 1:
-                continue
-            else:
-                tmplist.append(list(map(float, line.strip().split())))
-        cp.append(tmplist)
-        return cp
+        metricas = {}
+        with np.load(path) as file:
+            for metrica in file.files:
+                metricas[metrica] = file[metrica]
+        return metricas
 
     # load facet information from txt file
     def load_template(path):
@@ -91,18 +82,24 @@ class Loader:
         weight = weight**(1.0 / 3.0) * 1000
         measure_list.append(weight)
 
+        # calc height
+        up = vertex[275]
+        down = vertex[12478]
+        height = abs(down[2]-up[2])
+        measure_list.append(height * 1000)
+
         # calc other measures
         for measure in cp:
+            point_list = cp[measure]
             length = 0.0
-            p2 = vertex[int(measure[0][1]), :]
-            for i in range(1, len(measure)):
+            p2 = (vertex[int(point_list[0][0]), :] * point_list[0][3] +
+                  vertex[int(point_list[0][1]), :] * point_list[0][4] +
+                  vertex[int(point_list[0][2]), :] * point_list[0][5])
+            for point in point_list[1:]:
                 p1 = p2
-                if measure[i][0] == 1:
-                    p2 = vertex[int(measure[i][1]), :]
-                elif measure[i][0] == 2:
-                    p2 = vertex[int(measure[i][1]), :] * measure[i][3] + vertex[int(measure[i][2]), :] * measure[i][4]
-                else:
-                    p2 = vertex[int(measure[i][1]), :] * measure[i][4] + vertex[int(measure[i][2]), :] * measure[i][5] + vertex[int(measure[i][3]), :] * measure[i][6]
+                p2 = (vertex[int(point[0]), :] * point[3] +
+                      vertex[int(point[1]), :] * point[4] +
+                      vertex[int(point[2]), :] * point[5])
                 length += np.sqrt(np.sum((p1 - p2)**2.0))
             measure_list.append(length * 1000)
         return np.array(measure_list).reshape(MEASURE_NUM, 1)
