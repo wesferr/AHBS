@@ -10,7 +10,7 @@ from sklearn.linear_model import LinearRegression
 
 FACE_NUM = 25000
 VERTICES_NUM = 12500
-MEASURE_NUM = 15
+MEASURE_NUM = 14
 D_BASIS_NUM = 10
 V_BASIS_NUM = 10
 

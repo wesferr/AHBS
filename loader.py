@@ -6,14 +6,14 @@ import sys
 
 FACE_NUM = 25000
 VERTICES_NUM = 12500
-MEASURE_NUM = 15
+MEASURE_NUM = 14
 
 
 class Loader:
 
     def load():
-        cp = Loader.load_control_points("control_points.npz")
-        faces, normals = Loader.load_template("template.obj")
+        cp = Loader.load_control_points("base_data/control_points.npz")
+        faces, normals = Loader.load_template("base_data/template.obj")
         vertex = Loader.load_models("obj/", label='female')
         return cp, vertex, faces, normals
 

@@ -3,29 +3,28 @@ from sklearn.experimental import enable_iterative_imputer
 from sklearn.impute import IterativeImputer
 
 semantic = {
-    "Weight": 0,  # peso
-    "Height": 1,  # altura
-    "WAIST_HT": 2,  # 'altura_cintura'
-    "CROTCH_HT": 3,  # 'altura_virilha'
-    "UP_ARM_GTH_L": 4,  # 'braço'
-    "WAIST_GTH": 5,  # 'cintura'
-    "ARM_LTH_L": 6,  # 'comp_braço'
-    "THIGH_GTH_L_HZ": 7,  # 'coxa'
-    "CR_SHOULDER": 8,  # 'ombro_a_ombro'
-    "CALF_GTH_L": 9,  # 'panturrilha'
-    "BUST_CHEST_GTH": 10,  # 'peito'
-    "MID_NECK_GTH": 11,  # 'pescoço'
-    "DIST_NECK_T_HIP": 12,  # 'pescoço_ao_quadril'
-    "WRIST_GTH": 13,  # 'pulso'
-    "HIP_GTH": 14,  # 'quadril'
-    "Age": 15
+    "Weight": 0, # peso
+    "Height": 1, # altura
+    'INSEAM_L': 2,
+    'ELBOW_GTH_L': 3,
+    'HEAD_CIRC': 4,
+    'WAIST_GTH': 5,
+    "WAIST_T_BUTTOCK": 6,
+    'KNEE_HT': 7,
+    'NECK_AC_BACK_WTH_AL': 8,
+    'ARM_LTH_L': 9,
+    'THIGH_GTH_L_HZ': 10,
+    'CR_SHOULDER_O_NECK': 11,
+    'NECK_AT_BASE_GTH': 12,
+    'DIST_NECK_T_HIP': 13,
+    "Age": 14
 }
 
 MEASURE_NUM = 15
 
 
 class Predictor():
-    def __init__(self, age, weight, height):
+    def __init__(self, measures):
 
         self.measures = np.load("./processed_data/life_selected.npy")
 
@@ -34,16 +33,12 @@ class Predictor():
         self.imputer = IterativeImputer()
         self.imputer.fit(self.normalized_measure.T)
 
-        self.initial_age = age
-        self.initial_weight = weight
-        self.initial_height = height
-        self.current_age = age
-        self.data = np.full(MEASURE_NUM, np.nan)
-        self.data[0] = weight
-        self.data[1] = height
-        self.missing_initials(self.data)
+        self.initial_values = measures.copy()
+        self.initial_age = self.current_age = measures[-1]
+        self.missing_initials(measures)
 
-        ages = self.measures[:, 15].copy()
+        ages = self.measures[:, -1].copy()
+        
 
         self.mean_measures = self.measures.mean()
         self.std_measures = self.measures.std()
@@ -56,8 +51,12 @@ class Predictor():
             self.curves[element] = np.polynomial.Polynomial.fit(ages, column, deg=4)
             first = self.curves[element](self.initial_age)
             self.curves[element] = self.curves[element] - first
+
  
     def missing_initials(self, measures):
+        
+        age = measures[-1]
+        measures = measures[:-1]
         
         measures[0] = (measures[0] ** (1.0/3.0) * 100)
         measures *= 10
@@ -86,11 +85,16 @@ class Predictor():
             temporary_current /= 10
             temporary_current[0] = ((temporary_current[0]/100)**3)
             
-            return temporary_current.flatten()
+            return np.append(temporary_current.flatten(), self.current_age)
 
-        return self.current_measures
+        return np.append(self.current_measures, self.current_age)
 
 if __name__ == "__main__":
-    pred = Predictor(age=19, weight=65, height=165)
-    for i in range(100):
-        print(pred.predict_next(denormalize=True))
+    data = np.full(MEASURE_NUM, np.nan)
+    data[0] = 65
+    data[1] = 165
+    data[-1] = 19
+    pred = Predictor(data)
+    with np.printoptions(precision=3, suppress=True):
+        for i in range(19,80):
+            print(pred.predict_next(denormalize=True))

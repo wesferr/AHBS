@@ -11,6 +11,7 @@ from tkinter import Tk, StringVar, W, E, S, N
 from tkinter import ttk
 
 TORADIANS = math.pi/180.0
+MEASURE_NUM = 15
 
 
 class ConfigWindow():
@@ -80,7 +81,11 @@ class ViewWindow(mglw.WindowConfig):
         self.ctx.enable_only(moderngl.DEPTH_TEST | moderngl.CULL_FACE)
         self.ctx.clear(0.0, 0.0, 0.0, 0.0)
 
-        self.ager = predictor.Predictor(age=19, weight=75, height=175)
+        data = np.full(MEASURE_NUM, np.nan)
+        data[0] = 65
+        data[1] = 165
+        data[-1] = 19
+        self.ager = predictor.Predictor(data)
         self.builder = reshaper.Reshaper()
 
         self.program = self.ctx.program(
@@ -137,14 +142,15 @@ class ViewWindow(mglw.WindowConfig):
 
         if self.state == "render":
 
-            age_data = self.ager.predict_next(10)
+            age_data = self.ager.predict_next(5)
             if self.ager.current_age > 95:
                 self.state = "wait"
             else:
                 self.vertices, self.normals, self.indices = self.builder.build_body(age_data.copy())
 
         else:
-            pass
+            self.close()
+            exit(0)
 
         nbo = self.ctx.buffer(self.normals.astype('f4').tobytes())
         vbo = self.ctx.buffer(self.vertices.astype('f4').tobytes())

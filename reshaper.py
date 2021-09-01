@@ -8,7 +8,7 @@ from itertools import product, repeat
 
 FACE_NUM = 25000
 VERTICES_NUM = 12500
-MEASURE_NUM = 15
+MEASURE_NUM = 14
 
 
 def calcnorm(face, vertex):
@@ -45,6 +45,8 @@ class Reshaper:
 
     # local mapping using measure + rfe_mat
     def build_body(self, measures):
+        if measures.size == 15:
+            measures = measures[:-1]
         measures = measures.reshape(MEASURE_NUM, 1)
         measures *= self.std_measure
         measures += self.mean_measure
