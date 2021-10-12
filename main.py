@@ -1,87 +1,22 @@
-import moderngl
+
+import tkinter as tk
+
 import math
+import moderngl
+import numpy as np
 import predictor
 import reshaper
-import numpy as np
-import time
-import threading
 from pyrr import Matrix44, matrix44
-import moderngl_window as mglw
-from tkinter import Tk, StringVar, W, E, S, N
-from tkinter import ttk
 
+from PIL import Image, ImageTk
 TORADIANS = math.pi/180.0
+size = (960, 720)
 
 
-class ConfigWindow():
-
-    def calculate(self, *args):
-        try:
-            value = float(self.feet.get())
-            self.meters.set(int(0.3048 * value * 10000.0 + 0.5)/10000.0)
-        except ValueError:
-            pass
-
-    def __init__(self):
-        self.root = Tk()
-        self.root.title("Feet to Meters")
-
-        mainframe = ttk.Frame(self.root, padding="3 3 12 12")
-        mainframe.grid(column=0, row=0, sticky=(N, W, E, S))
-        self.root.columnconfigure(0, weight=1)
-        self.root.rowconfigure(0, weight=1)
-
-        self.feet = StringVar()
-        feet_entry = ttk.Entry(mainframe, width=7, textvariable=self.feet)
-        feet_entry.grid(column=2, row=1, sticky=(W, E))
-
-        self.meters = StringVar()
-        ttk.Label(mainframe, textvariable=self.meters).grid(column=2, row=2, sticky=(W, E))
-
-        ttk.Button(mainframe, text="Calculate", command=self.calculate).grid(column=3, row=3, sticky=W)
-
-        ttk.Label(mainframe, text="feet").grid(column=3, row=1, sticky=W)
-        ttk.Label(mainframe, text="is equivalent to").grid(column=1, row=2, sticky=E)
-        ttk.Label(mainframe, text="meters").grid(column=3, row=2, sticky=W)
-
-        for child in mainframe.winfo_children(): 
-            child.grid_configure(padx=5, pady=5)
-
-        feet_entry.focus()
-        self.root.bind("<Return>", self.calculate)
-
-    def update_loop(self):
-        self.root.update_idletasks()
-        self.root.update()
-
-    def close(self):
-        self.root.quit()
-
-
-class ViewWindow(mglw.WindowConfig):
-
-    window_size = (1280, 720)
-    # clear_color = None
-
-    def close(self):
-        self.config_window.close()
-
-    def __init__(self, **kwargs):
-
-
-        self.state = "render"
-        self.normals = np.array([])
-        self.vertices = np.array([])
-        self.indices = np.array([])
-        self.config_window = ConfigWindow()
-        super().__init__(**kwargs)
-        # Window & Context
-        # self.ctx = moderngl.create_context()
-        self.ctx.enable_only(moderngl.DEPTH_TEST | moderngl.CULL_FACE)
-        self.ctx.clear(0.0, 0.0, 0.0, 0.0)
-
-        self.ager = predictor.Predictor(age=19, weight=75, height=175)
-        self.builder = reshaper.Reshaper()
+class RenderContext:
+    def __init__(self, ctx):
+        self.ctx = ctx
+        self.state = "wait"
 
         self.program = self.ctx.program(
             vertex_shader='''
@@ -125,48 +60,177 @@ class ViewWindow(mglw.WindowConfig):
         self.projection_uniform = self.program['projection']
         self.normal_uniform = self.program['normal_matrix']
 
-        self.projection = Matrix44.perspective_projection(60, 16.0/9.0, 0.1, 1000.0)
-        self.view = Matrix44.look_at((0, 0, -2), (0, 0, 0), (0.0, 1.0, 0.0))   
-    
-    def render(self, time, frametime):
+        self.projection = Matrix44.perspective_projection(60, 4.0/3.0, 0.1, 1000.0)
+        self.view = Matrix44.look_at((0, 0, -2), (0, 0, 0), (0.0, 1.0, 0.0))
 
-        try:
-            self.config_window.update_loop()
-        except Exception:
-            exit(0)
+        self.rbo_rgba = ctx.renderbuffer(size)
+        self.rbo_depth = ctx.depth_renderbuffer(size)
+        self.fbo = ctx.framebuffer(self.rbo_rgba, self.rbo_depth)
+
+    def setup_predictor(self, data, label='female'):
+        self.ager = predictor.Predictor(data, label=label)
+        self.builder = reshaper.Reshaper(label=label)
+        self.state = "render"
+
+    def clear(self, color=(0, 0, 0, 0, 1.0)):
+        self.ctx.clear(*color)
+
+    def render(self):
+        
+        input_age_i = float(entries[-2].get()) if entries[-2].get() else 19.0
+        input_age_f = float(entries[-1].get()) if entries[-1].get() else 80.0
 
         if self.state == "render":
-
-            age_data = self.ager.predict_next(10)
-            if self.ager.current_age > 95:
-                self.state = "wait"
-            else:
+          
+            if input_age_i < input_age_f and self.ager.current_age < input_age_f:
+                age_data = self.ager.predict_next(1)
+                current_age_text.configure(text='Current Age: {}'.format(self.ager.current_age))
                 self.vertices, self.normals, self.indices = self.builder.build_body(age_data.copy())
+            elif input_age_i > input_age_f and self.ager.current_age > input_age_f:
+                age_data = self.ager.predict_next(-1)
+                current_age_text.configure(text='Current Age: {}'.format(self.ager.current_age))
+                self.vertices, self.normals, self.indices = self.builder.build_body(age_data.copy())
+            else:
+                return
+
+
+                
+            nbo = self.ctx.buffer(self.normals.astype('f4').tobytes())
+            vbo = self.ctx.buffer(self.vertices.astype('f4').tobytes())
+            ibo = self.ctx.buffer(self.indices.astype('i4').tobytes())
+
+            content = [
+                (nbo, '3f', 'norm'),
+                (vbo, '3f', 'vert'),
+            ]
+            vao = self.ctx.vertex_array(self.program, content, ibo)
+
+            model = Matrix44.from_translation((0, 0, 0), dtype=None)
+            model = Matrix44.from_eulers((90*TORADIANS, 135*TORADIANS, 0))
+
+            self.model_uniform.value = tuple(np.array(model).reshape(16))
+            self.view_uniform.value = tuple(np.array(self.view).reshape(16))
+            self.projection_uniform.value = tuple(np.array(self.projection).reshape(16))
+            normal_matrix = matrix44.inverse(self.view * model).T
+            self.normal_uniform.value = tuple(normal_matrix.reshape(16))
+
+            self.fbo.use()
+            self.fbo.clear(0.0, 0.0, 0.0, 1.0)
+            vao.render(moderngl.TRIANGLES)
+            image = Image.frombytes('RGB', self.fbo.size, self.fbo.read(), 'raw', 'RGB', 0, -1)
+            reshaper.save_obj("obj/output/{}.obj".format(self.ager.current_age), self.vertices, self.indices, self.normals)
+            image.save("photos/{}.png".format(self.ager.current_age))
+            img.paste(image)
 
         else:
             pass
 
-        nbo = self.ctx.buffer(self.normals.astype('f4').tobytes())
-        vbo = self.ctx.buffer(self.vertices.astype('f4').tobytes())
-        ibo = self.ctx.buffer(self.indices.astype('i4').tobytes())
 
-        content = [
-            (nbo, '3f', 'norm'),
-            (vbo, '3f', 'vert'),
-        ]
-        vao = self.ctx.vertex_array(self.program, content, ibo)
+ctx = moderngl.create_context(require=430, standalone=True)
+ctx.enable_only(moderngl.NOTHING)
+ctx.enable(moderngl.DEPTH_TEST | moderngl.CULL_FACE | moderngl.BLEND)
+canvas = RenderContext(ctx)
 
-        model = Matrix44.from_translation((0, 0, 0), dtype=None)
-        model = Matrix44.from_eulers((90*TORADIANS, 135*TORADIANS, 0))
+root = tk.Tk()
 
-        self.model_uniform.value = tuple(np.array(model).reshape(16))
-        self.view_uniform.value = tuple(np.array(self.view).reshape(16))
-        self.projection_uniform.value = tuple(np.array(self.projection).reshape(16))
-        normal_matrix = matrix44.inverse(self.view * model).T
-        self.normal_uniform.value = tuple(normal_matrix.reshape(16))
+img = ImageTk.PhotoImage(Image.new('RGB', size))
+lbl = tk.Label(root, image=img)
+lbl.grid(row=0, column=2, rowspan=18)
+current_age_text = tk.Label(root, text='Current Age:')
+current_age_text.grid(row=18, column=2, sticky=tk.N, padx=5)
 
-        vao.render(moderngl.TRIANGLES)
+inputs = [
+    'Weight',
+    'Height',
+    'Waist Height',
+    'Groin Height',
+    'Arm Circumference',
+    'Waist Circumference',
+    'Arm Length',
+    'Thigh Circumstance',
+    'Shoulders Distance',
+    'Calf Circumference',
+    'Chest Circumference',
+    'Neck Circumference',
+    'Neck to Hip Distance',
+    'Pulse Circumference',
+    'Hip Circumference',
+    '',
+    'Start',
+    'End',
+]
+entries = []
+
+label = 'female'
 
 
-mglw.run_window_config(ViewWindow)
-    
+def sel():
+    global label
+    if var.get() == 1:
+        label = 'female'
+    else:
+        label = 'male'
+
+
+var = tk.IntVar()
+var.set(1)
+R1 = tk.Radiobutton(root, text="Female", variable=var, value=1, command=sel)
+R1.grid(row=0, column=0, sticky=tk.W, padx=5)
+
+R2 = tk.Radiobutton(root, text="Male", variable=var, value=2, command=sel)
+R2.grid(row=0, column=1, sticky=tk.W, padx=5)
+
+for index, value in enumerate(inputs):
+    if index != 15:
+        text_value = '{}:'.format(value)
+        text = tk.Label(root, text=text_value)
+        text.grid(row=index+1, column=0, sticky=tk.W, padx=5)
+        metric = tk.Entry(root)
+        metric.grid(row=index+1, column=1)
+        entries.append(metric)
+
+text = tk.Label(root, text='Age')
+text.grid(row=16, column=0, columnspan=2)
+
+running = True
+
+
+def update():
+    data_change_handler()
+    canvas.clear()
+    canvas.render()
+
+
+def event_handler(event="X"):
+    if event == "X" or (isinstance(event, tk.Event) and event.keysym == "Escape"):
+        global running
+        running = False
+
+
+def data_change_handler():
+    if hasattr(canvas, 'ager'):
+        data = canvas.ager.get_denormalized_current_measures()
+        for index, entry in enumerate(entries[:-2]):
+            entry.delete(0, len(entry.get()))
+            entry.insert(0, np.round(data[index], 6))
+    else:
+        #  not ready yet
+        pass
+
+
+def button_handler():
+    data = [entry.get() for entry in entries]
+    data = np.array([float(i) if i.isnumeric() else np.nan for i in data])
+    canvas.setup_predictor(data[:-1], label=label)
+
+
+btn = tk.Button(root, text='Simulate', command=button_handler)
+btn.grid(row=19, column=0, columnspan=2)
+
+root.protocol("WM_DELETE_WINDOW", event_handler)
+root.bind('<Escape>', event_handler)
+
+while running:
+    root.update_idletasks()
+    update()
+    root.update()

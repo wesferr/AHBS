@@ -175,6 +175,7 @@ class Trainer:
             colidx.extend(vector)
 
             coeff = Trainer.construct_coeff_mat(d_inv_mean[i])
+
             data.extend(np.tile(coeff.flatten(), 3))
 
         vertices_deformation = scipy.sparse.coo_matrix((data, (rowidx, colidx)), shape=shape)
@@ -194,56 +195,58 @@ class Trainer:
 
 if __name__ == "__main__":
 
+    label = "female"
+
     generated_files = os.listdir("./processed_data")
 
-    if "cp.npz" in generated_files:
-        with np.load("./processed_data/cp.npz", allow_pickle=True) as data:
+    if "{}_cp.npz".format(label) in generated_files:
+        with np.load("./processed_data/{}_cp.npz".format(label), allow_pickle=True) as data:
             cp, vertices, faces, normals = data.values()
             cp = cp.item()
     else:
         cp, vertices, faces, normals = Loader.load()
-        np.savez("./processed_data/cp.npz", cp, vertices, faces, normals)
+        np.savez("./processed_data/{}_cp.npz".format(label), cp, vertices, faces, normals)
 
-    if "measure.npz" in generated_files:
-        with np.load("./processed_data/measure.npz", allow_pickle=True) as data:
+    if "{}_measure.npz".format(label) in generated_files:
+        with np.load("./processed_data/{}_measure.npz".format(label), allow_pickle=True) as data:
             measure, mean_measure, std_measure, normalized_measure = data.values()
     else:
         measure, mean_measure, std_measure, normalized_measure = Loader.load_measure_set(cp, vertices, faces)
-        np.savez("./processed_data/measure.npz", measure, mean_measure, std_measure, normalized_measure)
+        np.savez("./processed_data/{}_measure.npz".format(label), measure, mean_measure, std_measure, normalized_measure)
 
-    if "deformation.npz" in generated_files:
-        with np.load("./processed_data/deformation.npz", allow_pickle=True) as data:
+    if "{}_deformation.npz".format(label) in generated_files:
+        with np.load("./processed_data/{}_deformation.npz".format(label), allow_pickle=True) as data:
             deformation_inverse, deformation, determinants = data.values()
 
     else:
         deformation_inverse, deformation, determinants = Trainer.generate_face_deformation(vertices, faces)
-        np.savez("./processed_data/deformation.npz", deformation_inverse, deformation, determinants)
+        np.savez("./processed_data/{}_deformation.npz".format(label), deformation_inverse, deformation, determinants)
 
-    if "mask.npz" in generated_files:
-        with np.load("./processed_data/mask.npz", allow_pickle=True) as data:
+    if "{}_mask.npz".format(label) in generated_files:
+        with np.load("./processed_data/{}_mask.npz".format(label), allow_pickle=True) as data:
             mask, rfe_mat = data.values()
     else:
         mask, rfe_mat = Trainer.rfe_local(determinants, deformation, measure, normalized_measure)
-        np.savez("./processed_data/mask.npz", mask, rfe_mat)
+        np.savez("./processed_data/{}_mask.npz".format(label), mask, rfe_mat)
 
 
-    if "deformation_basis.npz" in generated_files:
-        with np.load("./processed_data/deformation_basis.npz", allow_pickle=True) as data:
+    if "{}_deformation_basis.npz".format(label) in generated_files:
+        with np.load("./processed_data/{}_deformation_basis.npz".format(label), allow_pickle=True) as data:
             deformation_basis, deformation_coeff = data.values()
     else:
         deformation_basis, deformation_coeff = Trainer.get_d_basis(deformation)
-        np.savez("./processed_data/deformation_basis.npz", deformation_basis, deformation_coeff)
+        np.savez("./processed_data/{}_deformation_basis.npz".format(label), deformation_basis, deformation_coeff)
 
 
-    if "vertices_deformation.npy" in generated_files:
-        vertices_deformation = np.load("./processed_data/vertices_deformation.npy", allow_pickle=True)
+    if "{}_vertices_deformation.npy".format(label) in generated_files:
+        vertices_deformation = np.load("./processed_data/{}_vertices_deformation.npy".format(label), allow_pickle=True)
     else:
         vertices_deformation = Trainer.generate_vertex_deformation(deformation_inverse, faces)
-        np.save("./processed_data/vertices_deformation.npy", vertices_deformation)
+        np.save("./processed_data/{}_vertices_deformation.npy".format(label), vertices_deformation)
 
 
-    if "measure_to_deformation.npy" in generated_files:
-        measure_to_deformation = np.load("./processed_data/measure_to_deformation.npy", allow_pickle=True)
+    if "{}_measure_to_deformation.npy".format(label) in generated_files:
+        measure_to_deformation = np.load("./processed_data/{}_measure_to_deformation.npy".format(label), allow_pickle=True)
     else:
         measure_to_deformation = Trainer.measure_to_deformation(deformation_coeff, normalized_measure)
-        np.save("./processed_data/measure_to_deformation.npy", measure_to_deformation)
+        np.save("./processed_data/{}_measure_to_deformation.npy".format(label), measure_to_deformation)

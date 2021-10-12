@@ -19,25 +19,25 @@ def calcnorm(face, vertex):
 
 class Reshaper:
 
-    def __init__(self):
-        data = np.load("./processed_data/cp.npz", allow_pickle=True)
+    def __init__(self, label="female"):
+        data = np.load("./processed_data/{}_cp.npz".format(label), allow_pickle=True)
         self.cp, self.vertices, self.faces, self.normals = data.values()
 
-        data = np.load("./processed_data/measure.npz", allow_pickle=True)
+        data = np.load("./processed_data/{}_measure.npz".format(label), allow_pickle=True)
         self.measure, self.mean_measure, self.std_measure, self.normalized_measure = data.values()
 
-        data = np.load("./processed_data/deformation.npz", allow_pickle=True)
+        data = np.load("./processed_data/{}_deformation.npz".format(label), allow_pickle=True)
         self.deformation_inverse, self.deformation, self.determinants = data.values()
 
-        data = np.load("./processed_data/mask.npz", allow_pickle=True)
+        data = np.load("./processed_data/{}_mask.npz".format(label), allow_pickle=True)
         self.mask, self.rfe_mat = data.values()
 
-        data = np.load("./processed_data/deformation_basis.npz", allow_pickle=True)
+        data = np.load("./processed_data/{}_deformation_basis.npz".format(label), allow_pickle=True)
         self.deformation_basis, self.deformation_coeff = data.values()
 
-        self.vertices_deformation = np.load("./processed_data/vertices_deformation.npy", allow_pickle=True)
+        self.vertices_deformation = np.load("./processed_data/{}_vertices_deformation.npy".format(label), allow_pickle=True)
 
-        self.measure_to_deformation = np.load("./processed_data/measure_to_deformation.npy", allow_pickle=True)
+        self.measure_to_deformation = np.load("./processed_data/{}_measure_to_deformation.npy".format(label), allow_pickle=True)
 
 
         vd = self.vertices_deformation.item()
@@ -61,28 +61,26 @@ class Reshaper:
 
     def compute_normals(vertex, facet):
 
-        pool = multiprocessing.Pool(processes=multiprocessing.cpu_count()//2)
-        tasks = [(
-            facet[i],
-            vertex
-            ) for i in range(len(facet))]
-        faces_normals = pool.starmap(calcnorm, tasks)
-        
-
-        elements = [[] for i in range(0, len(vertex))]
-        for element in faces_normals:
-            elements[element[0][0]].append(element[0][1])
-            elements[element[1][0]].append(element[1][1])
-            elements[element[2][0]].append(element[2][1])
-
         normals = []
-        for normalList in elements:
-            normal = sum(normalList) / len(normalList)
+        vertexNormalLists = [[] for i in range(0, len(vertex))]
+
+        for face in facet:
+            AB = np.array(vertex[face[1]]) - np.array(vertex[face[0]])
+            AC = np.array(vertex[face[2]]) - np.array(vertex[face[0]])
+            n = np.cross(AB, AC)
+            n /= np.linalg.norm(n)
+            # adiciona a normal ao array de todas as normais de cada um dos vertics
+            for i in range(0, 3):
+                vertexNormalLists[face[i]].append(n)
+
+        # soma os vetores normais das faces que o vertice faz parte, faz a media e normaliza
+        for idx, normalList in enumerate(vertexNormalLists):
+            normalSum = np.zeros(3)
+            for normal in normalList:
+                normalSum += normal
+            normal = normalSum / float(len(normalList))
             normal /= np.linalg.norm(normal)
-            normals.append(normal)
-
-        
-
+            normals.append(list(map(float, normal.tolist())))
         return np.array(normals)
 
     # synthesize a body by deform-based, given deform, output vertex

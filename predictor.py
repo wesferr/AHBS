@@ -25,22 +25,18 @@ MEASURE_NUM = 15
 
 
 class Predictor():
-    def __init__(self, age, weight, height):
+    def __init__(self, body_measures, label="female"):
 
-        self.measures = np.load("./processed_data/life_selected.npy")
+        self.measures = np.load("./processed_data/{}_life_selected.npy".format(label))
 
-        data = np.load("./processed_data/measure.npz", allow_pickle=True)
+        data = np.load("./processed_data/{}_measure.npz".format(label), allow_pickle=True)
         self.measure, self.mean_measure, self.std_measure, self.normalized_measure = data.values()
         self.imputer = IterativeImputer()
         self.imputer.fit(self.normalized_measure.T)
 
-        self.initial_age = age
-        self.initial_weight = weight
-        self.initial_height = height
-        self.current_age = age
-        self.data = np.full(MEASURE_NUM, np.nan)
-        self.data[0] = weight
-        self.data[1] = height
+        self.initial_age = body_measures[-1]
+        self.current_age = body_measures[-1]
+        self.data = body_measures[:-1]
         self.missing_initials(self.data)
 
         ages = self.measures[:, 15].copy()
@@ -72,7 +68,6 @@ class Predictor():
 
         previous_age = self.current_age
         self.current_age += delta_time
-        
 
         for element in list(semantic.keys())[:-1]:
             delta_measure = self.curves[element](self.current_age) - self.curves[element](previous_age)
@@ -90,7 +85,24 @@ class Predictor():
 
         return self.current_measures
 
+    def get_denormalized_current_measures(self):
+        temporary_current = self.current_measures.copy().transpose()
+        temporary_current *= self.std_measure
+        temporary_current += self.mean_measure
+
+        temporary_current /= 10
+        temporary_current[0] = ((temporary_current[0]/100)**3)
+
+        return temporary_current.flatten()
+
+
 if __name__ == "__main__":
-    pred = Predictor(age=19, weight=65, height=165)
-    for i in range(100):
-        print(pred.predict_next(denormalize=True))
+    data = np.full(16, np.nan)
+    data[0] = 65.0
+    data[1] = 165.0
+    data[-1] = 19
+    pred = Predictor(data, label='female')
+    for i in range(50):
+        pred.predict_next()
+        with np.printoptions(precision=4, suppress=True):
+            pred.get_denormalized_current_measures()
