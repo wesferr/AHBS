@@ -1,63 +1,36 @@
 import scipy
-import time
-import predictor
-import numpy as np
-import multiprocessing
-from itertools import product, repeat
-
-
-FACE_NUM = 25000
-VERTICES_NUM = 12500
-MEASURE_NUM = 15
-
-
-def calcnorm(face, vertex):
-    AB = np.array(vertex[face[1]]) - np.array(vertex[face[0]])
-    AC = np.array(vertex[face[2]]) - np.array(vertex[face[0]])
-    n = np.cross(AB, AC)
-    return [(face[0], n), (face[1], n), (face[2], n)]
 
 class Reshaper:
 
-    def __init__(self, label="female"):
-        data = np.load("./processed_data/{}_cp.npz".format(label), allow_pickle=True)
-        self.cp, self.vertices, self.faces, self.normals = data.values()
+    def __init__(self, loader, trainer):
+        self.loader = loader
+        self.trainer = trainer
 
-        data = np.load("./processed_data/{}_measure.npz".format(label), allow_pickle=True)
-        self.measure, self.mean_measure, self.std_measure, self.normalized_measure = data.values()
-
-        data = np.load("./processed_data/{}_deformation.npz".format(label), allow_pickle=True)
-        self.deformation_inverse, self.deformation, self.determinants = data.values()
-
-        data = np.load("./processed_data/{}_mask.npz".format(label), allow_pickle=True)
-        self.mask, self.rfe_mat = data.values()
-
-        data = np.load("./processed_data/{}_deformation_basis.npz".format(label), allow_pickle=True)
-        self.deformation_basis, self.deformation_coeff = data.values()
-
-        self.vertices_deformation = np.load("./processed_data/{}_vertices_deformation.npy".format(label), allow_pickle=True)
-
-        self.measure_to_deformation = np.load("./processed_data/{}_measure_to_deformation.npy".format(label), allow_pickle=True)
-
-
-        vd = self.vertices_deformation.item()
-        self.lu = scipy.sparse.linalg.splu(vd.transpose().dot(vd).tocsc())
-
-    # local mapping using measure + rfe_mat
     def build_body(self, measures):
-        measures = measures.reshape(MEASURE_NUM, 1)
-        measures *= self.std_measure
-        measures += self.mean_measure
+        measures = measures.reshape(self.trainer.nmeasures, 1)
+        measures *= self.trainer.std_measure
+        measures += self.trainer.mean_measure
 
         d = []
-        for i in range(0, FACE_NUM):
-            mask = self.mask[:, i]
+        for i in range(0, self.trainer.nfaces):
+            mask = self.trainer.mask_matrix[:, i]
+            mask = mask.astype(bool)
             alpha = measures[mask]
-            d.extend(self.rfe_mat[i].dot(alpha))
+            d.extend(self.trainer.deformation_matrix[i].dot(alpha))
 
         d = np.array(d)
         v, n, f = self.synthesize(d)
         return v, n, f
+
+    # synthesize a body by deform-based, given deform, output vertex
+    def synthesize(self, deform):
+        AtD = self.trainer.vertex_deformations.transpose().dot(deform)
+        vertices = self.trainer.lu.solve(AtD)
+        vertices = vertices[:self.trainer.nvertices * 3].reshape(self.trainer.nvertices, 3)
+        vertices -= np.mean(vertices, axis=0)
+        normals = Reshaper.compute_normals(vertices, self.trainer.faces-1)
+        return vertices, normals, self.trainer.faces-1
+
 
     def compute_normals(vertex, facet):
 
@@ -83,15 +56,6 @@ class Reshaper:
             normals.append(list(map(float, normal.tolist())))
         return np.array(normals)
 
-    # synthesize a body by deform-based, given deform, output vertex
-    def synthesize(self, deform):
-        Atd = self.vertices_deformation.item().transpose().dot(deform)
-        vertices = self.lu.solve(Atd)
-        vertices = vertices[:VERTICES_NUM * 3].reshape(VERTICES_NUM, 3)
-        vertices -= np.mean(vertices, axis=0)
-        normals = Reshaper.compute_normals(vertices, self.faces-1)
-        return vertices, normals, self.faces-1
-
 # save obj file
 def save_obj(filename, v, f, n):
     file = open(filename, 'w')
@@ -102,12 +66,26 @@ def save_obj(filename, v, f, n):
     for i in range(0, f.shape[0]):
         file.write('f %d//%d %d//%d %d//%d\n' % (f[i][0]+1, f[i][0]+1, f[i][1]+1, f[i][1]+1, f[i][2]+1, f[i][2]+1))
     file.close()
-    print('obj file {} saved'.format(filename))
-
+    print('File {} saved'.format(filename))
 
 if __name__ == "__main__":
 
-    pred = predictor.Predictor(age=19, weight=85, height=180)
-    reshaper = Reshaper()
+    from loader import Loader
+    from trainer import Trainer
+    from predictor import Predictor
+    import numpy as np
+
+    gender = "male"
+
+    loader = Loader(gender=gender)
+    faces, vertices, measures = loader.get_data()
+    trainer = Trainer(faces, vertices, measures, gender=gender)
+
+    data = np.full(16, np.nan)
+    data[0] = 65.0
+    data[1] = 165.0
+    data[-1] = 19
+    pred = Predictor(data, trainer, gender=gender)
+    reshaper = Reshaper(loader, trainer)
     v, n, f = reshaper.build_body(pred.current_measures)
-    save_obj("teste.obj", v, f, n)
+    save_obj("teste1.obj",v,f,n)

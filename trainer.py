@@ -1,252 +1,264 @@
 import numpy as np
-import time
-import sys
 import scipy
-from loader import Loader
-import os
 from multiprocessing import Pool, cpu_count
-from sklearn.feature_selection import RFE
 from sklearn.linear_model import LinearRegression
-
-FACE_NUM = 25000
-VERTICES_NUM = 12500
-MEASURE_NUM = 15
-D_BASIS_NUM = 10
-V_BASIS_NUM = 10
+from sklearn.feature_selection import RFE
+from tqdm import tqdm as progressbar
 
 
 class Trainer:
+    def __init__(self, faces, vertices, measures, gender="female", nfeatures=9):
 
-    # import the 4th point of the triangle, and calculate the deformation
-    def assemble_face(v1, v2, v3):
-        v21 = v2 - v1
-        v31 = v3 - v1
-        v41 = np.cross(v21, v31)
-        v41 /= np.sqrt(np.linalg.norm(v41))
-        return np.column_stack((v21, np.column_stack((v31, v41))))
+        self.vertices = vertices
+        self.faces = faces
+        self.measures = measures
+        self.vertices_mean = self.vertices.mean(axis=0)
 
-    def get_inv_mean(mean_vertex, faces):
-        print("Generating mean body deformation matrix")
-        d_inv_mean = np.zeros((FACE_NUM, 3, 3))
-        for i in range(FACE_NUM):
-            f = faces[i] - 1
-            v1 = mean_vertex[f[0]]
-            v2 = mean_vertex[f[1]]
-            v3 = mean_vertex[f[2]]
-            d_inv_mean[i] = Trainer.assemble_face(v1, v2, v3)
-            d_inv_mean[i] = np.linalg.inv(d_inv_mean[i])
-        return d_inv_mean
+        self.nfeatures = nfeatures
+        self.nfaces = self.faces.shape[0]
+        self.nmeasures = self.measures.shape[0]
+        self.nbodies = self.measures.shape[1]
+        self.nvertices = self.vertices.shape[1]
 
-    def generate_face_deformation(vertices, faces):
-        print("Generating face deformation matrix")
-        mean_vertex = vertices.mean(axis=0)
-        deformation_inverse = Trainer.get_inv_mean(mean_vertex, faces)
-        deformation = np.zeros((vertices.shape[0], FACE_NUM, 9))
-        determinants = []
+        self.mean_measure = measures.mean(axis=1).reshape(self.nmeasures, 1)
+        self.std_measure = measures.std(axis=1).reshape(self.nmeasures, 1)
+        self.normalized_measures = self.measures - self.mean_measure
+        self.normalized_measures /= self.std_measure
 
-        initial_time = time.time()
-        for i in range(FACE_NUM):
+        try:
+            self.determinants = np.load("processed_data/{}_determinants.npy".format(gender))
+            self.deformation = np.load("processed_data/{}_deformation.npy".format(gender))
+            self.deformation_inverse = np.load("processed_data/{}_deformation_inverse.npy".format(gender))
+        except:
+            values = self.generate_face_deformation()
+            self.determinants = values[0]
+            self.deformation = values[1]
+            self.deformation_inverse = values[2]
+            np.save("processed_data/{}_determinants.npy".format(gender), self.determinants)
+            np.save("processed_data/{}_deformation.npy".format(gender), self.deformation)
+            np.save("processed_data/{}_deformation_inverse.npy".format(gender), self.deformation_inverse)
 
-            f = faces[i] - 1
-            for j in range(vertices.shape[0]):
-                v1 = vertices[j, f[0]]
-                v2 = vertices[j, f[1]]
-                v3 = vertices[j, f[2]]
-                Q = Trainer.assemble_face(v1, v2, v3).dot(deformation_inverse[i])
-                determinants.append(np.linalg.det(Q))
-                deformation[j, i, :] = Q.flat
 
-            sys.stdout.write("{:.2f}% - {:.2f}s \r".format((i/FACE_NUM)*100, time.time() - initial_time))
-            sys.stdout.flush()
+        try:
+            self.deformation_matrix = np.load("processed_data/{}_deformation_matrix.npy".format(gender))
+            self.mask_matrix = np.load("processed_data/{}_mask_matrix.npy".format(gender))
+        except:
+            values = self.recursive_elimination()
+            self.deformation_matrix = values[0]
+            self.mask_matrix = values[1]
+            np.save("processed_data/{}_deformation_matrix.npy".format(gender), self.deformation_matrix)
+            np.save("processed_data/{}_mask_matrix.npy".format(gender), self.mask_matrix)
 
-        determinants = np.array(determinants).reshape(FACE_NUM, vertices.shape[0])
+        try:
+            self.deformation_matrix = np.load("processed_data/{}_vertex_deformations.npy".format(gender))
+        except:
+            values = self.generate_vertices_deformation()
+            self.vertex_deformations = values
+            np.save("processed_data/{}_vertex_deformations.npy".format(gender), self.vertex_deformations)
 
-        return deformation_inverse, deformation, determinants
+        self.lu = scipy.sparse.linalg.splu(
+            self.vertex_deformations.transpose().dot(self.vertex_deformations)
+        )
 
-    def rfe_local(determinants, deformation, measures, normalized_measures, label="female", k_features=9):
-        print("Running recursive feature elimination")
-        body_num = deformation.shape[0]
-        x = normalized_measures.transpose()
-        initial_time = time.time()
+
+    """  BODY DEFORMATION GENERATION SECTION  """
+
+    def generate_face_deformation(self):
+        deform_inverse = self.calculate_deformation_inverse()
+        deform, determ = self.calculate_deformation(deform_inverse)
+        return determ, deform, deform_inverse
+
+    def calculate_deformation_inverse(self):
+        inverse_deformation = np.zeros((self.nfaces, 3, 3))
+        faces_list = range(self.nfaces)
+        for idx in progressbar(faces_list, desc="Faces Inverse Deformation"):
+            face = self.faces[idx] - 1
+            v_1 = self.vertices_mean[face[0]]
+            v_2 = self.vertices_mean[face[1]]
+            v_3 = self.vertices_mean[face[2]]
+            deformation = Trainer.calculate_face_deformation(v_1, v_2, v_3)
+            inverse_deformation[idx] = np.linalg.inv(deformation)
+        return inverse_deformation
+
+    def calculate_deformation(self, deformation_inverse):
+
+        # deformation_inverse is V-1 in sumner article
+        # face_deformation is V~ in sumner article
+        # source_face_deformation is Q in sumner article
+        # determinants is Y matrix of Zeng article
+
+        deform = np.zeros((self.nbodies, self.nfaces, 9))
+        determ = []
+
+        ntasks = 50
+        tasks = [(
+            self.faces[face_id:face_id+ntasks],
+            self.nbodies,
+            self.vertices,
+            deformation_inverse[face_id:face_id+ntasks],
+        ) for face_id in range(0, self.nfaces, ntasks)]
 
         pool = Pool(processes=cpu_count())
-        tasks = [(
-            i,
-            determinants[i, :],
-            deformation[:, i, :],
-            body_num,
-            x,
-            measures,
-            k_features, initial_time) for i in range(FACE_NUM)]
-
-        results = pool.starmap(Trainer.rfe_multiprocess, tasks)
-
+        results = list(
+            progressbar(
+                pool.imap(Trainer.parallel_calculate_deformation_map, tasks),
+                total=len(tasks),
+                desc="Faces Deformation"
+            )
+        )
         pool.close()
         pool.join()
 
-        rfe_mat = np.array([ele[0] for ele in results]).reshape(FACE_NUM, 9, k_features)
-        mask = np.array([ele[1] for ele in results]).reshape(FACE_NUM, MEASURE_NUM).transpose()
-        return mask, rfe_mat
+        deform = np.array([result[0] for result in results])
+        determ = np.array([result[1] for result in results])
+            
+        deform = deform.reshape(self.nbodies, self.nfaces, 9)
+        determ = determ.reshape(self.nfaces, self.nbodies)
 
-    def rfe_multiprocess(i, determinants, deformation, body_num, x, measure, k_features, initial_time):
-        y = np.array(determinants)
-        model = LinearRegression()
-        rfe = RFE(model, n_features_to_select=k_features)
-        rfe.fit(x, y)
-        flag = np.array(rfe.support_).reshape(MEASURE_NUM, 1)
-        flag = flag.repeat(body_num, axis=1)
+        return deform, determ
 
-        # calculte linear mapping mat
-        S = np.array(deformation)
-        S.shape = (S.size, 1)
-        m = np.array(measure[flag])
-        m.shape = (k_features, body_num)
+    def parallel_calculate_deformation_map(args):
 
-        M = Trainer.build_matrix(m, 9)
-        MtM = M.transpose().dot(M)
-        MtS = M.transpose().dot(S)
-        ans = np.array(scipy.sparse.linalg.spsolve(MtM, MtS))
-        ans.shape = (9, k_features)
+        return Trainer.parallel_calculate_deformation(*args)
+
+    def parallel_calculate_deformation(faces, nbodies, vertices, deformations_inverse):
+        import gc
+        deform = []
+        determ = []
+        for i in range(len(faces)):
+            face = faces[i] - 1
+            deformation_inverse = deformations_inverse[i]
+            for vertice_id in range(nbodies):
+                vertice_1 = vertices[vertice_id, face[0]]
+                vertice_2 = vertices[vertice_id, face[1]]
+                vertice_3 = vertices[vertice_id, face[2]]
+                face_deform = Trainer.calculate_face_deformation(
+                    vertice_1, vertice_2, vertice_3
+                )
+                source_deform = face_deform.dot(deformation_inverse)
+                determ.append(np.linalg.det(source_deform))
+                deform.append(source_deform.flatten())
+
+        return deform, determ
+
+    def calculate_face_deformation(v_1, v_2, v_3):
+        v_21 = v_2 - v_1
+        v_31 = v_3 - v_1
+        v_41 = np.cross(v_21, v_31)
+        v_41 /= np.sqrt(np.linalg.norm(v_41))
+        v31_v41 = np.column_stack((v_31, v_41))
+        face_deformation = np.column_stack((v_21, v31_v41))
+        return face_deformation
 
 
-        sys.stdout.write("{:.2f}% - {:.2f}s \r".format((i/FACE_NUM)*100, time.time() - initial_time))
-        sys.stdout.flush()
+    """  RECURSIVE FEATURE ELIMINATION SECTION  """
 
-        return [ans, rfe.support_]
+    def recursive_elimination(self):
+        tasks = [
+            (
+                self.determinants[i, :],
+                self.deformation[:, i, :],
+                self.normalized_measures,
+                self.nfeatures,
+                self.nmeasures,
+                self.nbodies,
+                self.measures,
+            )
+            for i in range(self.nfaces)
+        ]
+        # results = pool.starmap(Trainer.parallel_measure_elimination, progressbar(tasks, total=len(tasks) ,desc="Recursive Feature Elimination"))
 
-    # monta uma matrix 9*9*n_bodies
-    def build_matrix(m_datas, basis_num):
+        pool = Pool(processes=cpu_count())
+        results = list(
+            progressbar(
+                pool.imap(Trainer.parallel_measure_elimination_map, tasks),
+                total=len(tasks),
+                desc="Recursive Feature Elimination"
+            )
+        )
+        pool.close()
+        pool.join()
 
-        shape = (m_datas.shape[1] * basis_num, m_datas.shape[0] * basis_num)
-        data = []
-        rowid = []
-        colid = []
-        for i in range(0, m_datas.shape[1]):
-            for j in range(0, basis_num):
-                data += [c for c in m_datas[:, i].flat]
-                rowid += [basis_num * i + j for a in range(m_datas.shape[0])]
-                colid += [a for a in range(j * m_datas.shape[0], (j + 1) * m_datas.shape[0])]
+        deformation_matrix = np.array([])
+        mask_matrix = np.array([])
+        for result in results:
+            deformation_matrix = np.append(deformation_matrix, result[0])
+            mask_matrix = np.append(mask_matrix, result[1])
 
-        return scipy.sparse.coo_matrix((data, (rowid, colid)), shape)
+        deformation_matrix = np.array(deformation_matrix).reshape(
+            self.nfaces, 9, self.nfeatures
+        )
+        mask_matrix = mask_matrix.reshape(self.nfaces, self.nmeasures)
+        mask_matrix = mask_matrix.transpose()
 
-    # calculating deform-based presentation(PCA)
-    def get_d_basis(deformation, label="female"):
+        return deformation_matrix, mask_matrix
 
-        print("Running Principal Component Analisys")
+    # deformation_list is de S on sumner article
+    # selected_measures is de M on zeng article
+    # ans is the P´ on zeng article
 
-        mean_deform = deformation.mean(axis=0)
-        mean_deform.shape = (FACE_NUM, 9)
-        std_deform = deformation.std(axis=0)
-        std_deform.shape = (FACE_NUM, 9)
+    def parallel_measure_elimination_map(args):
+        return Trainer.parallel_measure_elimination(*args)
 
-        deformation -= mean_deform
-        deformation /= std_deform
-        deformation.shape = (deformation.shape[0], 9 * FACE_NUM)
-        d = deformation.transpose()
-        
-        deformation_basis, d_sigma, V = np.linalg.svd(d, full_matrices=0)
-        deformation_basis = np.array(deformation_basis[:, :D_BASIS_NUM]).reshape(9 * FACE_NUM, D_BASIS_NUM)
-        deformation_coeff = np.dot(deformation_basis.transpose(), d)
+    def parallel_measure_elimination(determinants, deformation,
+        normalized_measures, nfeatures, nmeasures, nbodies, measures):
 
-        return deformation_basis, deformation_coeff
+        x = normalized_measures.transpose()
+        LR = LinearRegression()
+        recursion_manager = RFE(LR, n_features_to_select=nfeatures)
+        recursion_manager.fit(x, determinants)
 
-    def construct_coeff_mat(mat):
-        return np.row_stack((-mat.sum(0), mat)).T
+        mask = recursion_manager.get_support().reshape(nmeasures, 1)
+        bodies_mask = mask.repeat(nbodies, axis=1)
 
-    def generate_vertex_deformation(d_inv_mean, facet, label="female"):
-        print('Building vertex deformation matrix')
+        selected_measures = measures[bodies_mask]
+        selected_measures.shape = (nfeatures, nbodies)
+        measures_matrix = Trainer.build_measure_matrix(selected_measures, nbodies, nfeatures)
+        deformation_list = deformation.reshape(deformation.size, 1)
+
+        MtM = measures_matrix.transpose().dot(measures_matrix)
+        MtD = measures_matrix.transpose().dot(deformation_list)
+        ans = scipy.sparse.linalg.spsolve(MtM, MtD)
+        return ans, mask
+
+    def build_measure_matrix(selected_measures, nbodies, nfeatures):
+        results = []
+        for body in range(nbodies):
+            for i in range(9):
+                M = np.zeros((9, nfeatures))
+                M[i] = selected_measures[:, body]
+                results.append(M.flatten())
+        return scipy.sparse.csc_matrix(results)
+
+
+    """  VERTICES DEFORMATION GENERATION SECTION  """
+
+    def generate_vertices_deformation(self):
         data = []
         colidx = []
-        off = VERTICES_NUM * 3
+        off = self.nvertices * 3
         
-        shape = (FACE_NUM * 9, (VERTICES_NUM + FACE_NUM) * 3)
+        shape = (self.nfaces * 9, (self.nvertices + self.nfaces) * 3)
 
-        rowidx = np.arange(shape[0])
+        rowidx =  np.arange(shape[0])
         rowidx = np.repeat(rowidx, 4)
 
-        for i in range(0, FACE_NUM):
-
-            v = facet[i, :].flatten() - 1
-            vector = np.hstack([v, i])
+        faces_list = range(self.nfaces)
+        for face_id in progressbar(faces_list, desc="Vertices Deformation Matrix"):
+            v = self.faces[face_id, :].flatten() - 1
+            vector = np.hstack([v, face_id])
             vector = np.tile(vector, 3).reshape(3, vector.size) * 3
             vector = vector.T + np.array((0, 1, 2))
             vector = vector.T + np.array((0, 0, 0, off))
             vector = np.repeat(vector, 3, axis=0).flatten()
             colidx.extend(vector)
 
-            coeff = Trainer.construct_coeff_mat(d_inv_mean[i])
-
+            coeff = self.construct_coeff_mat(self.deformation_inverse[face_id])
             data.extend(np.tile(coeff.flatten(), 3))
 
-        vertices_deformation = scipy.sparse.coo_matrix((data, (rowidx, colidx)), shape=shape)
+        structure = (data, (rowidx, colidx))
+        vertices_deformation = scipy.sparse.coo_matrix(structure, shape=shape)
         return vertices_deformation
 
-    # calculate global mapping from measure to deformation PCA coeff
-    def measure_to_deformation(d_coeff, t_measure):
-        print("Build measure to deformation matrix")
-        D = d_coeff.copy()
-        D.shape = (D.size, 1)
-        M = Trainer.build_matrix(t_measure, D_BASIS_NUM)
-        MtM = M.transpose().dot(M)
-        MtD = M.transpose().dot(D)
-        ans = np.array(scipy.sparse.linalg.spsolve(MtM, MtD))
-        ans.shape = (D_BASIS_NUM, MEASURE_NUM)
-        return ans
-
-if __name__ == "__main__":
-
-    label = "female"
-
-    generated_files = os.listdir("./processed_data")
-
-    if "{}_cp.npz".format(label) in generated_files:
-        with np.load("./processed_data/{}_cp.npz".format(label), allow_pickle=True) as data:
-            cp, vertices, faces, normals = data.values()
-            cp = cp.item()
-    else:
-        cp, vertices, faces, normals = Loader.load()
-        np.savez("./processed_data/{}_cp.npz".format(label), cp, vertices, faces, normals)
-
-    if "{}_measure.npz".format(label) in generated_files:
-        with np.load("./processed_data/{}_measure.npz".format(label), allow_pickle=True) as data:
-            measure, mean_measure, std_measure, normalized_measure = data.values()
-    else:
-        measure, mean_measure, std_measure, normalized_measure = Loader.load_measure_set(cp, vertices, faces)
-        np.savez("./processed_data/{}_measure.npz".format(label), measure, mean_measure, std_measure, normalized_measure)
-
-    if "{}_deformation.npz".format(label) in generated_files:
-        with np.load("./processed_data/{}_deformation.npz".format(label), allow_pickle=True) as data:
-            deformation_inverse, deformation, determinants = data.values()
-
-    else:
-        deformation_inverse, deformation, determinants = Trainer.generate_face_deformation(vertices, faces)
-        np.savez("./processed_data/{}_deformation.npz".format(label), deformation_inverse, deformation, determinants)
-
-    if "{}_mask.npz".format(label) in generated_files:
-        with np.load("./processed_data/{}_mask.npz".format(label), allow_pickle=True) as data:
-            mask, rfe_mat = data.values()
-    else:
-        mask, rfe_mat = Trainer.rfe_local(determinants, deformation, measure, normalized_measure)
-        np.savez("./processed_data/{}_mask.npz".format(label), mask, rfe_mat)
-
-
-    if "{}_deformation_basis.npz".format(label) in generated_files:
-        with np.load("./processed_data/{}_deformation_basis.npz".format(label), allow_pickle=True) as data:
-            deformation_basis, deformation_coeff = data.values()
-    else:
-        deformation_basis, deformation_coeff = Trainer.get_d_basis(deformation)
-        np.savez("./processed_data/{}_deformation_basis.npz".format(label), deformation_basis, deformation_coeff)
-
-
-    if "{}_vertices_deformation.npy".format(label) in generated_files:
-        vertices_deformation = np.load("./processed_data/{}_vertices_deformation.npy".format(label), allow_pickle=True)
-    else:
-        vertices_deformation = Trainer.generate_vertex_deformation(deformation_inverse, faces)
-        np.save("./processed_data/{}_vertices_deformation.npy".format(label), vertices_deformation)
-
-
-    if "{}_measure_to_deformation.npy".format(label) in generated_files:
-        measure_to_deformation = np.load("./processed_data/{}_measure_to_deformation.npy".format(label), allow_pickle=True)
-    else:
-        measure_to_deformation = Trainer.measure_to_deformation(deformation_coeff, normalized_measure)
-        np.save("./processed_data/{}_measure_to_deformation.npy".format(label), measure_to_deformation)
+    def construct_coeff_mat(self, mat):
+        return np.row_stack((-mat.sum(0), mat)).T

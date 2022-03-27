@@ -4,8 +4,10 @@ import tkinter as tk
 import math
 import moderngl
 import numpy as np
-import predictor
-import reshaper
+from loader import Loader
+from predictor import Predictor
+from reshaper import Reshaper
+from trainer import Trainer
 from pyrr import Matrix44, matrix44
 
 from PIL import Image, ImageTk
@@ -68,8 +70,11 @@ class RenderContext:
         self.fbo = ctx.framebuffer(self.rbo_rgba, self.rbo_depth)
 
     def setup_predictor(self, data, label='female'):
-        self.ager = predictor.Predictor(data, label=label)
-        self.builder = reshaper.Reshaper(label=label)
+        self.loader = Loader(gender=label)
+        faces, vertices, measures = self.loader.get_data()
+        self.trainer = Trainer(faces, vertices, measures)
+        self.builder = Reshaper(self.loader, self.trainer)
+        self.ager = Predictor(data, self.trainer, gender=label)
         self.state = "render"
 
     def clear(self, color=(0, 0, 0, 0, 1.0)):
@@ -234,3 +239,14 @@ while running:
     root.update_idletasks()
     update()
     root.update()
+
+
+
+
+# from trainer import Trainer
+# from loader import Loader
+
+# if __name__ == "__main__":
+#     loader = Loader(gender="female")
+#     faces, vertices, measures = loader.get_data()
+#     Trainer(faces, vertices, measures)

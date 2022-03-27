@@ -1,6 +1,7 @@
 processed_data/*
 obj/*
 photos/*
+bodies/*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
