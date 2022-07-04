@@ -3,7 +3,7 @@ obj/*
 photos/*
 bodies/*
 curves-modules/*.npy
-
+curves-modules/npy-output/*.npy
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
