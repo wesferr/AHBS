@@ -2,6 +2,7 @@ processed_data/*
 obj/*
 photos/*
 bodies/*
+curve-modules/*.npy
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
