@@ -86,3 +86,24 @@ def generate_bodies(gender='female', nbodies=3000):
 
     np.save(f"bodies-{gender}-pose-0.npy", np.array(bodies_pose_0))
     np.save(f"bodies-{gender}-pose-1.npy", np.array(bodies_pose_1))
+
+def generate_mean_body(gender='female'):
+
+    batch_size = 3
+    star = STAR(gender=gender, num_betas=batch_size)
+
+    trans = tf.constant(np.zeros((1,3)), dtype=tf.float32)
+    betas = tf.constant(np.zeros((1,batch_size)), dtype=tf.float32)
+
+    # pose 0
+    pose = tf.constant(np.zeros((1,72)), dtype=tf.float32)
+    body1 = generate_star_body(star, pose, betas, trans)
+
+    # pose 1
+    pose = np.zeros((1,72))
+    pose[0][53] = 80 * np.pi/180
+    pose[0][50] = -80 * np.pi/180
+    pose = tf.constant(pose, dtype=tf.float32)
+    body2 = generate_star_body(star, pose, betas, trans)
+
+    return body1, body2
