@@ -42,7 +42,7 @@ class CurveApplier():
             height = CurveUtils.calculate_height(floor, self.curves_0['waist-girth'], body)
             measures.append(height)
 
-            height = CurveUtils.calculate_height(floor, self.curves_0['hip-girth'], body)
+            height = CurveUtils.calculate_height(floor, self.curves_0['thigh-girth'], body)
             measures.append(height)
 
             bodies_measures.append(measures)
@@ -56,7 +56,7 @@ def generate_star_body(star, pose, betas, trans):
 
 def generate_bodies(gender='female', nbodies=3000):
 
-    batch_size = 3
+    batch_size = 10
     star = STAR(gender=gender, num_betas=batch_size)
 
     bodies_pose_0 = []
@@ -66,7 +66,7 @@ def generate_bodies(gender='female', nbodies=3000):
         trans = np.zeros((1,3))
         trans = tf.constant(trans, dtype=tf.float32)
 
-        betas = (np.random.rand(*(1,batch_size)) - 0.5) * 6
+        betas = (np.random.rand(*(1,batch_size)) - 0.5) * 7
         betas = tf.constant(betas, dtype=tf.float32)
 
         # pose 0

@@ -64,6 +64,6 @@ if __name__ == '__main__':
     for idx, position in enumerate(positions):
         CurveUtils.save_obj(f'objs/{idx}.obj', position)
 
-    # applier = CurveApplier(medidas, curves)
-    # applier.generate_measures("female")
-    # applier.generate_measures("male")
+    applier = CurveApplier(medidas, curves)
+    applier.generate_measures("female")
+    applier.generate_measures("male")
